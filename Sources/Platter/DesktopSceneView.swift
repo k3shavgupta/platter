@@ -48,6 +48,25 @@ struct DesktopSceneView: View {
         switch settings.backdrop {
         case .albumTint: albumTint
         case .mahogany: woodDesk
+        case .transparent: Color.clear
+        case .customColor: settings.customColor
+        case .customImage: customWallpaper
+        case .waves:
+            WavesBackdropView(palette: ScenePalette.blending(fadeFrom, fadeTo, fade), unit: unit)
+        }
+    }
+
+    private var customWallpaper: some View {
+        Group {
+            if let path = settings.customImagePath,
+               let nsImage = NSImage(contentsOfFile: path) {
+                Image(nsImage: nsImage)
+                    .resizable()
+                    .scaledToFill()
+                    .clipped()
+            } else {
+                Color.black
+            }
         }
     }
 
@@ -55,22 +74,14 @@ struct DesktopSceneView: View {
     /// nothing but a soft vertical fall-off, a bloom of the same hue behind the deck, and
     /// the vignette. The turntable is the only detail in the frame, which is the whole
     /// point of the minimal look.
-    ///
-    /// One wash, whose colour is blended through hue space as `fade` runs — not two
-    /// stacked layers dissolving. Stacking and dissolving is the same arithmetic as
-    /// interpolating the components, so it would have the identical grey midpoint.
     private var albumTint: some View {
         ZStack {
             wash(ScenePalette.blending(fadeFrom, fadeTo, fade))
-            // A lighter vignette than the desk wants: on a flat colour field a heavy one
-            // stops reading as falloff and starts reading as a spotlight.
             RadialGradient(
                 colors: [.clear, .black.opacity(0.38)],
                 center: .center, startRadius: unit * 0.34, endRadius: unit * 1.0
             )
         }
-        // Launching straight into a playing track should show its colour, not fade up
-        // from slate as though something had just changed.
         .onAppear {
             fadeFrom = palette
             fadeTo = palette
@@ -95,19 +106,9 @@ struct DesktopSceneView: View {
 
     private static let fadeDuration: TimeInterval = 1.6
 
-    /// Driven by the palette, never by the track.
-    ///
-    /// Artwork is fetched asynchronously and lands *after* the title has already been
-    /// published, and `Track`'s equality ignores artwork — so a fade keyed on the track
-    /// fired while the colours were still the old ones, and the actual colour change that
-    /// followed a moment later arrived unanimated, as a hard cut.
     private func crossFade(to new: ScenePalette) {
         guard new != fadeTo else { return }
 
-        // Skipping through tracks restarts the fade from the colour actually on screen.
-        // `fade` cannot be read for that: SwiftUI sets the model value to its target the
-        // instant the animation begins, so it always reads 1 mid-flight. The elapsed time
-        // is the only honest source, run back through the same easing curve.
         let elapsed = Date().timeIntervalSince(fadeStarted)
         let linear = min(1, max(0, elapsed / Self.fadeDuration))
         let eased = linear * linear * (3 - 2 * linear)
@@ -131,7 +132,6 @@ struct DesktopSceneView: View {
         }
     }
 
-    /// Grain, figure and light shafts, drawn once into a cached bitmap.
     private var woodDetail: some View {
         Image(nsImage: SceneTextures.woodDetail(aspect: size.width / max(size.height, 1)))
             .resizable()
@@ -167,7 +167,6 @@ struct DesktopSceneView: View {
             .rotationEffect(.degrees(-1.5))
     }
 
-    /// The open edge of the paper sleeve along the right side, plus its clipped corner.
     private var sleeveOpening: some View {
         ZStack(alignment: .topTrailing) {
             LinearGradient(
@@ -221,14 +220,12 @@ struct DesktopSceneView: View {
             )
     }
 
-    /// Fine vertical brushing across the metal top plate, drawn once and cached.
     private var brushedTexture: some View {
         Image(nsImage: SceneTextures.brushedMetal(size: CGSize(width: plinthW, height: plinthH)))
             .resizable()
             .clipShape(RoundedRectangle(cornerRadius: unit * 0.016))
     }
 
-    /// Darker band along the bottom edge so the plinth reads as a solid box.
     private var plinthLip: some View {
         LinearGradient(colors: [.clear, .black.opacity(0.16)], startPoint: .top, endPoint: .bottom)
             .frame(height: plinthH * 0.07)
@@ -339,10 +336,6 @@ struct DesktopSceneView: View {
         .shadow(color: .black.opacity(0.5), radius: unit * 0.004, y: unit * 0.002)
     }
 
-    /// Specular sheen — deliberately OUTSIDE the rotation. This is not artistic licence:
-    /// the bright lobes on a real record are light diffracting off the groove walls, and
-    /// because the grooves are concentric that pattern is fixed to the light source, not
-    /// to the disc. It stays put while the record turns underneath it.
     private var staticSheen: some View {
         ZStack {
             plasticGloss
@@ -355,13 +348,6 @@ struct DesktopSceneView: View {
         .allowsHitTesting(false)
     }
 
-    /// The two opposed lobes that make vinyl read as vinyl: a wide one facing the window
-    /// light and a weaker one 180° opposite, fading out over the label and again at the
-    /// rim so the gloss sits in the groove field where it belongs.
-    ///
-    /// The lobes are sampled from a smooth curve rather than written as a handful of
-    /// stops. Sparse stops in an angular gradient give straight-edged sectors that
-    /// converge on the centre, and the record ends up looking lit by a spotlight cone.
     private var grooveGloss: some View {
         AngularGradient(
             gradient: Gradient(stops: Self.glossStops),
@@ -383,19 +369,14 @@ struct DesktopSceneView: View {
         )
     }
 
-    /// Raised-cosine highlight: `cos²` of twice the angle puts a broad soft lobe on each
-    /// side, and the second term dims the lobe facing away from the light.
     private static let glossStops: [Gradient.Stop] = (0...72).map { i in
         let t = Double(i) / 72
-        let theta = t * 2 * .pi
+        let theta = t * 2.0 * .pi
         let lobe = pow(max(0, cos(theta)), 1.9)
         let facing = 0.38 + 0.62 * cos(theta / 2).magnitude
         return Gradient.Stop(color: .white.opacity(0.40 * lobe * facing), location: t)
     }
 
-    /// A wide, very soft wash across the whole disc. On its own it is barely visible;
-    /// what it does is stop the unlit half from going dead matte, which is the giveaway
-    /// that something is drawn rather than moulded in plastic.
     private var plasticGloss: some View {
         LinearGradient(
             colors: [.white.opacity(0.085), .white.opacity(0.02), .clear, .white.opacity(0.035)],
@@ -403,7 +384,6 @@ struct DesktopSceneView: View {
         )
     }
 
-    /// A short bright arc where the rolled edge of the disc turns into the light.
     private var rimLight: some View {
         Circle()
             .strokeBorder(
@@ -524,5 +504,75 @@ struct DesktopSceneView: View {
             .overlay(cap)
             .rotationEffect(.degrees(38))
             .shadow(color: .black.opacity(0.35), radius: unit * 0.003, y: unit * 0.002)
+    }
+}
+
+// MARK: - Animated Waves Canvas
+
+struct WavesBackdropView: View {
+    let palette: ScenePalette
+    let unit: CGFloat
+
+    var body: some View {
+        TimelineView(.animation) { timeline in
+            let time = timeline.date.timeIntervalSinceReferenceDate
+
+            Canvas { context, size in
+                let w = size.width
+                let h = size.height
+
+                // 1. Gradient de fundal profund
+                let baseRect = CGRect(origin: .zero, size: size)
+                context.fill(
+                    Path(baseRect),
+                    with: .linearGradient(
+                        Gradient(colors: [
+                            palette.top.opacity(0.80),
+                            palette.bottom.opacity(0.95),
+                            Color(red: 0.05, green: 0.05, blue: 0.08)
+                        ]),
+                        startPoint: .zero,
+                        endPoint: CGPoint(x: 0, y: h)
+                    )
+                )
+
+                // 2. Configurația straturilor de valuri armonice
+                let waveLayers: [(speed: Double, freq: Double, amp: Double, yRatio: Double, color: Color, opacity: Double)] = [
+                    (speed: 0.45, freq: 0.0016, amp: h * 0.07, yRatio: 0.58, color: palette.glow, opacity: 0.28),
+                    (speed: -0.35, freq: 0.0022, amp: h * 0.05, yRatio: 0.68, color: palette.top, opacity: 0.32),
+                    (speed: 0.60, freq: 0.0014, amp: h * 0.08, yRatio: 0.78, color: palette.bottom, opacity: 0.38),
+                    (speed: -0.50, freq: 0.0026, amp: h * 0.04, yRatio: 0.88, color: palette.glow, opacity: 0.22)
+                ]
+
+                for layer in waveLayers {
+                    var path = Path()
+                    let baseY = h * layer.yRatio
+                    path.move(to: CGPoint(x: 0, y: h))
+                    path.addLine(to: CGPoint(x: 0, y: baseY))
+
+                    let step: CGFloat = 8
+                    for x in stride(from: 0, through: w + step, by: step) {
+                        let relX = Double(x)
+                        let angle = relX * layer.freq + time * layer.speed
+                        let y = baseY + sin(angle) * layer.amp + cos(angle * 0.6) * (layer.amp * 0.35)
+                        path.addLine(to: CGPoint(x: x, y: y))
+                    }
+
+                    path.addLine(to: CGPoint(x: w, y: h))
+                    path.closeSubpath()
+
+                    context.fill(path, with: .color(layer.color.opacity(layer.opacity)))
+                }
+            }
+        }
+        // Vignette subtilă peste valuri pentru a evidenția platanul și discul
+        .overlay(
+            RadialGradient(
+                colors: [.clear, .black.opacity(0.42)],
+                center: .center,
+                startRadius: unit * 0.30,
+                endRadius: unit * 0.98
+            )
+        )
     }
 }

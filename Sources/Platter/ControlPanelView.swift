@@ -1,8 +1,8 @@
 import SwiftUI
+import AppKit
+import UniformTypeIdentifiers
 
-/// Settings surface for the app. Platter normally lives in the menu bar, but a full
-/// menu bar can leave the status item with nowhere to go, so this panel is also
-/// reachable by re-opening Platter from Finder or the Dock.
+/// Settings surface for the app.
 struct ControlPanelView: View {
     @ObservedObject var settings: Settings
     @State var showOnDesktop: Bool
@@ -33,10 +33,39 @@ struct ControlPanelView: View {
             }
             .padding(.top, 14)
 
-            Text("Album colour tints the desktop with the current cover's background.")
+            // Controale dinamice în funcție de fundalul ales
+            if settings.backdrop == .customColor {
+                HStack {
+                    Text("Select colour:")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    ColorPicker("", selection: $settings.customColor, supportsOpacity: false)
+                        .labelsHidden()
+                }
+                .padding(.top, 6)
+            } else if settings.backdrop == .customImage {
+                HStack(spacing: 8) {
+                    Button("Choose Image...") {
+                        selectImage()
+                    }
+                    .font(.caption)
+
+                    if let path = settings.customImagePath {
+                        Text(URL(fileURLWithPath: path).lastPathComponent)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    }
+                }
+                .padding(.top, 6)
+            }
+
+            Text(backdropDescription)
                 .font(.caption)
                 .foregroundStyle(.secondary)
-                .padding(.top, 2)
+                .padding(.top, 4)
 
             Toggle("Launch at login", isOn: $launchAtLogin)
                 .onChange(of: launchAtLogin) { _, value in onToggleLogin(value) }
@@ -57,7 +86,37 @@ struct ControlPanelView: View {
         }
         .toggleStyle(.switch)
         .padding(22)
-        .frame(width: 340, height: 330)
+        .frame(width: 340, height: 360)
+    }
+
+    private var backdropDescription: String {
+        switch settings.backdrop {
+        case .albumTint:
+            return "Album colour tints the desktop with the current cover's background."
+        case .mahogany:
+            return "Draws the classic mahogany wood desk."
+        case .transparent:
+            return "Transparent — keeps your native desktop wallpaper visible."
+        case .customColor:
+            return "Draws a solid background in your chosen color."
+        case .customImage:
+            return "Draws your chosen wallpaper image behind the vinyl."
+        case .waves:
+            return "Renders smooth, fluid animated waves tinted with the current album palette."
+        }
+    }
+
+    private func selectImage() {
+        let panel = NSOpenPanel()
+        panel.title = "Select Wallpaper Image"
+        panel.prompt = "Choose"
+        panel.allowedContentTypes = [.image]
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.canCreateDirectories = false
+        if panel.runModal() == .OK, let url = panel.url {
+            settings.customImagePath = url.path
+        }
     }
 
     private var header: some View {

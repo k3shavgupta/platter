@@ -30,7 +30,11 @@ final class DesktopWindowController {
         screenObserver = NotificationCenter.default.addObserver(
             forName: NSApplication.didChangeScreenParametersNotification,
             object: nil, queue: .main
-        ) { [weak self] _ in self?.rebuildWindowsIfScreensChanged() }
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.rebuildWindowsIfScreensChanged()
+            }
+        }
     }
 
     var isVisible: Bool { desiredVisibility }
