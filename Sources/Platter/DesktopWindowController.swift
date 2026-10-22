@@ -1,36 +1,46 @@
 import AppKit
 import SwiftUI
+import Combine
 
-/// Manages one borderless, click-through window per screen, pinned just above the
-/// desktop picture (below icons) so the turntable scene reads as part of the desktop
-/// itself rather than a floating app window.
 @MainActor
 final class DesktopWindowController {
     private var windows: [NSWindow] = []
     private let poller: NowPlayingPoller
     private let settings: Settings
     private var screenObserver: NSObjectProtocol?
+    private var cancellables = Set<AnyCancellable>()
 
-    /// The user's on/off choice, independent of window state. `isVisible` used to read
-    /// this back off `windows.first?.isVisible` — which meant any screen-parameter change
-    /// silently re-showed the scene after the user had turned it off, because
-    /// rebuildWindows() always ended each fresh window with orderFront(nil), with nothing
-    /// remembering "off" across the rebuild.
     private var desiredVisibility = true
-
-    /// The screen layout rebuildWindows() last built for, so a screen-parameter
-    /// notification that didn't actually change anything — Dock/menu-bar changes post
-    /// this too, not just monitor changes — doesn't tear down and recreate every window.
     private var lastScreenFrames: [CGRect] = []
 
     init(poller: NowPlayingPoller, settings: Settings) {
         self.poller = poller
         self.settings = settings
         rebuildWindows()
+
         screenObserver = NotificationCenter.default.addObserver(
             forName: NSApplication.didChangeScreenParametersNotification,
             object: nil, queue: .main
-        ) { [weak self] _ in self?.rebuildWindowsIfScreensChanged() }
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.rebuildWindowsIfScreensChanged()
+            }
+        }
+
+        settings.$isEditMode
+            .receive(on: RunLoop.main)
+            .sink { [weak self] editing in
+                guard let self else { return }
+                for window in self.windows {
+                    window.ignoresMouseEvents = !editing
+                    if editing {
+                        window.level = .floating
+                    } else {
+                        window.level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.desktopWindow)) + 1)
+                    }
+                }
+            }
+            .store(in: &cancellables)
     }
 
     var isVisible: Bool { desiredVisibility }
@@ -60,10 +70,9 @@ final class DesktopWindowController {
             defer: false,
             screen: screen
         )
-        // One level above the desktop picture, below desktop icons.
-        window.level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.desktopWindow)) + 1)
+        window.level = settings.isEditMode ? .floating : NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.desktopWindow)) + 1)
         window.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle, .fullScreenNone]
-        window.ignoresMouseEvents = true
+        window.ignoresMouseEvents = !settings.isEditMode
         window.isOpaque = false
         window.backgroundColor = .clear
         window.hasShadow = false

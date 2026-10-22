@@ -2,9 +2,7 @@ import Combine
 import Foundation
 
 enum BackdropStyle: String, CaseIterable, Identifiable {
-    /// A flat wash tinted from the current cover's background colour.
     case albumTint
-    /// The original mahogany desk.
     case mahogany
 
     var id: String { rawValue }
@@ -17,10 +15,11 @@ enum BackdropStyle: String, CaseIterable, Identifiable {
     }
 }
 
-/// The handful of user choices the scene reads. Small enough to stay a single observable
-/// object; the scene redraws only when one of these actually changes.
 final class Settings: ObservableObject {
     private static let backdropKey = "backdropStyle"
+    private static let scaleKey = "sceneScale"
+    private static let offsetXKey = "sceneOffsetX"
+    private static let offsetYKey = "sceneOffsetY"
 
     @Published var backdrop: BackdropStyle {
         didSet {
@@ -29,8 +28,34 @@ final class Settings: ObservableObject {
         }
     }
 
+    @Published var scale: Double {
+        didSet {
+            UserDefaults.standard.set(scale, forKey: Self.scaleKey)
+        }
+    }
+
+    @Published var offsetX: Double {
+        didSet {
+            UserDefaults.standard.set(offsetX, forKey: Self.offsetXKey)
+        }
+    }
+
+    @Published var offsetY: Double {
+        didSet {
+            UserDefaults.standard.set(offsetY, forKey: Self.offsetYKey)
+        }
+    }
+
+    @Published var isEditMode: Bool = false
+
     init() {
         let stored = UserDefaults.standard.string(forKey: Self.backdropKey)
         backdrop = stored.flatMap(BackdropStyle.init(rawValue:)) ?? .albumTint
+
+        let storedScale = UserDefaults.standard.double(forKey: Self.scaleKey)
+        scale = storedScale > 0 ? storedScale : 1.0
+
+        offsetX = UserDefaults.standard.double(forKey: Self.offsetXKey)
+        offsetY = UserDefaults.standard.double(forKey: Self.offsetYKey)
     }
 }

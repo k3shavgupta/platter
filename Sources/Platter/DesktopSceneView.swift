@@ -13,6 +13,7 @@ struct DesktopSceneView: View {
     @State private var fadeTo: ScenePalette = .neutral
     @State private var fade: Double = 1
     @State private var fadeStarted = Date.distantPast
+    @State private var dragOffset: CGSize = .zero
 
     private var track: Track { poller.track }
     private var palette: ScenePalette { ArtworkPalette.palette(for: track.artwork, id: track.artworkID) }
@@ -30,15 +31,67 @@ struct DesktopSceneView: View {
     private var pivotD: CGFloat { plinthH * 0.105 }
     private var discDX: CGFloat { -plinthW * 0.131 }
 
+    // MARK: - Scene Body
+
     var body: some View {
         ZStack {
             backdrop
-            HStack(spacing: plinthW * 0.01) {
-                coverCard
-                turntable
-            }
+                .allowsHitTesting(false)
+
+            playerWidget
         }
         .frame(width: size.width, height: size.height)
+    }
+
+    // MARK: - Player Widget (Vinil + Copertă + Drag & Resize)
+
+    private var playerWidget: some View {
+        HStack(spacing: plinthW * 0.01) {
+            coverCard
+            turntable
+        }
+        .overlay {
+            if settings.isEditMode {
+                RoundedRectangle(cornerRadius: unit * 0.02)
+                    .strokeBorder(Color.accentColor, style: StrokeStyle(lineWidth: 2.5, dash: [8, 6]))
+                    .padding(-unit * 0.015)
+                    .overlay(alignment: .top) {
+                        HStack(spacing: 8) {
+                            Image(systemName: "arrow.up.and.down.and.arrow.left.and.right")
+                            Text("Drag to move")
+                            Button {
+                                settings.isEditMode = false
+                            } label: {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .font(.system(size: 13))
+                            }
+                            .buttonStyle(.plain)
+                            .help("Done editing")
+                        }
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(Capsule().fill(Color.accentColor))
+                        .offset(y: -unit * 0.035)
+                    }
+            }
+        }
+        .scaleEffect(settings.scale)
+        .offset(x: settings.offsetX + dragOffset.width, y: settings.offsetY + dragOffset.height)
+        .gesture(
+            settings.isEditMode ?
+                DragGesture()
+                    .onChanged { value in
+                        dragOffset = value.translation
+                    }
+                    .onEnded { value in
+                        settings.offsetX += value.translation.width
+                        settings.offsetY += value.translation.height
+                        dragOffset = .zero
+                    }
+                : nil
+        )
     }
 
     // MARK: - Backdrop
@@ -62,15 +115,11 @@ struct DesktopSceneView: View {
     private var albumTint: some View {
         ZStack {
             wash(ScenePalette.blending(fadeFrom, fadeTo, fade))
-            // A lighter vignette than the desk wants: on a flat colour field a heavy one
-            // stops reading as falloff and starts reading as a spotlight.
             RadialGradient(
                 colors: [.clear, .black.opacity(0.38)],
                 center: .center, startRadius: unit * 0.34, endRadius: unit * 1.0
             )
         }
-        // Launching straight into a playing track should show its colour, not fade up
-        // from slate as though something had just changed.
         .onAppear {
             fadeFrom = palette
             fadeTo = palette
@@ -95,19 +144,9 @@ struct DesktopSceneView: View {
 
     private static let fadeDuration: TimeInterval = 1.6
 
-    /// Driven by the palette, never by the track.
-    ///
-    /// Artwork is fetched asynchronously and lands *after* the title has already been
-    /// published, and `Track`'s equality ignores artwork — so a fade keyed on the track
-    /// fired while the colours were still the old ones, and the actual colour change that
-    /// followed a moment later arrived unanimated, as a hard cut.
     private func crossFade(to new: ScenePalette) {
         guard new != fadeTo else { return }
 
-        // Skipping through tracks restarts the fade from the colour actually on screen.
-        // `fade` cannot be read for that: SwiftUI sets the model value to its target the
-        // instant the animation begins, so it always reads 1 mid-flight. The elapsed time
-        // is the only honest source, run back through the same easing curve.
         let elapsed = Date().timeIntervalSince(fadeStarted)
         let linear = min(1, max(0, elapsed / Self.fadeDuration))
         let eased = linear * linear * (3 - 2 * linear)
@@ -131,7 +170,6 @@ struct DesktopSceneView: View {
         }
     }
 
-    /// Grain, figure and light shafts, drawn once into a cached bitmap.
     private var woodDetail: some View {
         Image(nsImage: SceneTextures.woodDetail(aspect: size.width / max(size.height, 1)))
             .resizable()
@@ -167,7 +205,6 @@ struct DesktopSceneView: View {
             .rotationEffect(.degrees(-1.5))
     }
 
-    /// The open edge of the paper sleeve along the right side, plus its clipped corner.
     private var sleeveOpening: some View {
         ZStack(alignment: .topTrailing) {
             LinearGradient(
@@ -221,14 +258,12 @@ struct DesktopSceneView: View {
             )
     }
 
-    /// Fine vertical brushing across the metal top plate, drawn once and cached.
     private var brushedTexture: some View {
         Image(nsImage: SceneTextures.brushedMetal(size: CGSize(width: plinthW, height: plinthH)))
             .resizable()
             .clipShape(RoundedRectangle(cornerRadius: unit * 0.016))
     }
 
-    /// Darker band along the bottom edge so the plinth reads as a solid box.
     private var plinthLip: some View {
         LinearGradient(colors: [.clear, .black.opacity(0.16)], startPoint: .top, endPoint: .bottom)
             .frame(height: plinthH * 0.07)
@@ -339,10 +374,6 @@ struct DesktopSceneView: View {
         .shadow(color: .black.opacity(0.5), radius: unit * 0.004, y: unit * 0.002)
     }
 
-    /// Specular sheen — deliberately OUTSIDE the rotation. This is not artistic licence:
-    /// the bright lobes on a real record are light diffracting off the groove walls, and
-    /// because the grooves are concentric that pattern is fixed to the light source, not
-    /// to the disc. It stays put while the record turns underneath it.
     private var staticSheen: some View {
         ZStack {
             plasticGloss
@@ -355,13 +386,6 @@ struct DesktopSceneView: View {
         .allowsHitTesting(false)
     }
 
-    /// The two opposed lobes that make vinyl read as vinyl: a wide one facing the window
-    /// light and a weaker one 180° opposite, fading out over the label and again at the
-    /// rim so the gloss sits in the groove field where it belongs.
-    ///
-    /// The lobes are sampled from a smooth curve rather than written as a handful of
-    /// stops. Sparse stops in an angular gradient give straight-edged sectors that
-    /// converge on the centre, and the record ends up looking lit by a spotlight cone.
     private var grooveGloss: some View {
         AngularGradient(
             gradient: Gradient(stops: Self.glossStops),
@@ -383,19 +407,14 @@ struct DesktopSceneView: View {
         )
     }
 
-    /// Raised-cosine highlight: `cos²` of twice the angle puts a broad soft lobe on each
-    /// side, and the second term dims the lobe facing away from the light.
     private static let glossStops: [Gradient.Stop] = (0...72).map { i in
         let t = Double(i) / 72
-        let theta = t * 2 * .pi
+        let theta = t * 2.0 * .pi
         let lobe = pow(max(0, cos(theta)), 1.9)
         let facing = 0.38 + 0.62 * cos(theta / 2).magnitude
         return Gradient.Stop(color: .white.opacity(0.40 * lobe * facing), location: t)
     }
 
-    /// A wide, very soft wash across the whole disc. On its own it is barely visible;
-    /// what it does is stop the unlit half from going dead matte, which is the giveaway
-    /// that something is drawn rather than moulded in plastic.
     private var plasticGloss: some View {
         LinearGradient(
             colors: [.white.opacity(0.085), .white.opacity(0.02), .clear, .white.opacity(0.035)],
@@ -403,7 +422,6 @@ struct DesktopSceneView: View {
         )
     }
 
-    /// A short bright arc where the rolled edge of the disc turns into the light.
     private var rimLight: some View {
         Circle()
             .strokeBorder(
